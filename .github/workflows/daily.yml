@@ -1,0 +1,35 @@
+name: Daily Meta Ads Sync
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC = 08:00 CEST (літній час)
+  workflow_dispatch:        # ручний запуск з вкладки Actions
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync
+        env:
+          META_ACCESS_TOKEN:           ${{ secrets.META_ACCESS_TOKEN }}
+          META_AD_ACCOUNT_ID:          ${{ secrets.META_AD_ACCOUNT_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          CLIENT_SHEET_ID:             ${{ secrets.CLIENT_SHEET_ID }}
+          LOOKBACK_DAYS:               3
+          CLIENT_DATE_COL:             2
+          CLIENT_SPEND_COL:            5
+          CLIENT_TAB_NAME_FORMAT:      "{month} ({year})"
+        run: python -m src.main
