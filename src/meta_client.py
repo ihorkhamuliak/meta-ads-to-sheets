@@ -14,6 +14,7 @@ from .config import (
     BASE_BACKOFF_SECONDS,
     GRAPH_API_BASE,
     INSIGHT_FIELDS,
+    MAX_BACKOFF_SECONDS,
     MAX_RETRIES,
     RETRYABLE_HTTP_CODES,
     RETRYABLE_META_CODES,
@@ -50,7 +51,7 @@ def _date_range(lookback_days: int) -> tuple[str, str]:
 
 def _backoff(attempt: int) -> float:
     """Exponential back-off with ±25 % jitter so parallel runs don't pile up."""
-    delay = BASE_BACKOFF_SECONDS * (2 ** attempt)
+    delay = min(BASE_BACKOFF_SECONDS * (2 ** attempt), MAX_BACKOFF_SECONDS)
     jitter = delay * 0.25 * (2 * random.random() - 1)
     return max(1.0, delay + jitter)
 

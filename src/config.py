@@ -13,8 +13,9 @@ RETRYABLE_META_CODES: frozenset[int] = frozenset({1, 2, 613, 80004})
 # HTTP status codes to retry
 RETRYABLE_HTTP_CODES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
 
-MAX_RETRIES = 5
+MAX_RETRIES = 7              # покриває ~2 хв ретраїв замість ~30 с (Meta code=2 блимає до кількох хв)
 BASE_BACKOFF_SECONDS = 2.0
+MAX_BACKOFF_SECONDS = 60.0   # стеля на одну паузу між спробами
 
 # Fields requested from the insights endpoint (campaign level, per day)
 INSIGHT_FIELDS = (
