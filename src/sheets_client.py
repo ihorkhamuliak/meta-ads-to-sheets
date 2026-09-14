@@ -204,6 +204,71 @@ class SheetsClient:
             logger.info("Записано %.2f zł → %s!%s%d (%s)", total, tab_name,
                         _col_letter(self._client_spend_col), row_idx, date_iso)
 
+    def write_usd_to_tracker(
+        self,
+        spend_by_date: dict[Date, float],
+        pln_per_usd: dict[Date, float],
+        client_sheet_id: str,
+        tab_name: str,
+        dry_run: bool = False,
+    ) -> None:
+        """
+        Трекер клієнта: одна вкладка, розділ «по днях» під шапкою «День | Дата».
+        Пише ЛИШЕ колонку витрат (E) у доларах. Дата в колонці B зберігається числом
+        (серійний день), тому рядок шукаємо за числом, а не за текстом.
+        Будь-яка невідповідність — виняток, а не пропуск: рядки створені наперед,
+        і дописати в кінець означало б покласти дані нижче формул, повз підсумки.
+        """
+        ws = self._gc.open_by_key(client_sheet_id).worksheet(tab_name)
+        spend_col = _col_letter(self._client_spend_col)
+
+        shown = ws.get_values("A1:B", value_render_option="FORMATTED_VALUE")
+        header = [i for i, r in enumerate(shown, start=1) if r[:2] == ["День", "Дата"]]
+        if len(header) != 1:
+            raise RuntimeError(f"Шапка «День | Дата» знайдена {len(header)} разів у {tab_name!r}, очікував 1")
+
+        serials = ws.get_values(f"B{header[0] + 1}:B", value_render_option="UNFORMATTED_VALUE")
+        row_by_serial: dict[int, int] = {}
+        for i, r in enumerate(serials, start=header[0] + 1):
+            if r and isinstance(r[0], (int, float)):
+                if int(r[0]) in row_by_serial:
+                    raise RuntimeError(f"Дата-серійник {int(r[0])} повторюється в рядках {row_by_serial[int(r[0])]} і {i}")
+                row_by_serial[int(r[0])] = i
+
+        plan: list[tuple[int, Date, float, float]] = []
+        for d in sorted(spend_by_date):
+            serial = (d - Date(1899, 12, 30)).days
+            if serial not in row_by_serial:
+                raise RuntimeError(f"Рядок для {d:%d.%m.%Y} не знайдено у {tab_name!r} — не пишу нікуди")
+            usd = round(spend_by_date[d] / pln_per_usd[d], 2)
+            plan.append((row_by_serial[serial], d, spend_by_date[d], usd))
+
+        cells = [f"{spend_col}{row}" for row, *_ in plan]
+        neighbours = [f"F{row}:G{row}" for row, *_ in plan]
+        before = ws.batch_get(cells, value_render_option="UNFORMATTED_VALUE")
+        formulas_before = ws.batch_get(neighbours, value_render_option="FORMULA")
+
+        for (row, d, pln, usd), old in zip(plan, before):
+            old_val = old[0][0] if old and old[0] else ""
+            logger.info("%s %s%d: було %r → стане %.2f $ (%.2f zł / %.4f)%s", f"{d:%d.%m.%Y}", spend_col, row,
+                        old_val, usd, pln, pln_per_usd[d], "  [DRY RUN]" if dry_run else "")
+        if dry_run:
+            return
+
+        ws.batch_update([{"range": c, "values": [[usd]]} for c, (_, _, _, usd) in zip(cells, plan)],
+                        value_input_option="RAW")
+
+        # Доказ запису — перечитане значення і цілі формули поруч, а не «API не впав»
+        after = ws.batch_get(cells, value_render_option="UNFORMATTED_VALUE")
+        formulas_after = ws.batch_get(neighbours, value_render_option="FORMULA")
+        for (row, d, _, usd), got in zip(plan, after):
+            got_val = got[0][0] if got and got[0] else None
+            if got_val is None or abs(float(got_val) - usd) > 0.005:
+                raise RuntimeError(f"{spend_col}{row} ({d}): записав {usd}, перечитав {got_val!r}")
+        if [list(map(list, f)) for f in formulas_before] != [list(map(list, f)) for f in formulas_after]:
+            raise RuntimeError("Формули F:G змінились після запису — перевір таблицю")
+        logger.info("Перевірено після запису: %d клітинок %s, формули F:G цілі", len(plan), spend_col)
+
     # ── Private tab initialisation ────────────────────────────────────────────
 
     def _ensure_raw_tab(self) -> None:

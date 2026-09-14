@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from datetime import date
 from pathlib import Path
 
 # Load .env for local runs; in CI the env vars are injected directly by the runner.
@@ -13,6 +14,7 @@ except ImportError:
     pass   # python-dotenv optional; not installed in some minimal envs
 
 from .config import Config
+from .fx import FxError, pln_per_usd
 from .meta_client import MetaAPIError, MetaClient, MetaTokenError
 from .sheets_client import SheetsClient
 
@@ -72,9 +74,23 @@ def run() -> None:
             sheets.upsert_rows(rows)
 
         # ── Таблиця клієнта ───────────────────────────────────────────────
-        if config.client_sheet_id:
+        if config.client_sheet_id and config.client_mode == "tracker_usd":
+            currency = meta.fetch_account_currency()
+            if currency != "PLN":
+                raise RuntimeError(f"Валюта акаунта {currency!r}, а курс NBP рахується з PLN — не пишу")
+            spend: dict[date, float] = {}
+            for r in rows:
+                d = date.fromisoformat(r["date"])
+                spend[d] = spend.get(d, 0.0) + float(r["spend"] or 0)
+            rates = pln_per_usd(sorted(spend))
+            sheets.write_usd_to_tracker(spend, rates, config.client_sheet_id,
+                                        config.client_tab_name, config.dry_run)
+        elif config.client_sheet_id:
             sheets.write_daily_totals_to_client_sheet(rows, config.client_sheet_id)
 
+    except FxError as exc:
+        log.critical("Курс валют: %s", exc)
+        sys.exit(5)
     except Exception as exc:
         log.critical("Помилка запису в таблицю: %s", exc, exc_info=True)
         sys.exit(4)

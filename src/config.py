@@ -74,6 +74,13 @@ class Config:
     client_spend_col: int       # номер колонки Ad spend (E=5)
     client_tab_name_format: str # формат назви вкладки, напр. "{month} ({year})"
 
+    # Режим таблиці клієнта:
+    #   monthly_tabs — окрема вкладка на місяць, витрати в валюті акаунта (як було до 09.2026)
+    #   tracker_usd  — одна вкладка, рядок дня під шапкою «День | Дата», витрати в $ за курсом NBP
+    client_mode: str
+    client_tab_name: str        # назва єдиної вкладки для tracker_usd
+    dry_run: bool               # True — лише показати, що буде записано
+
     @classmethod
     def from_env(cls) -> "Config":
         return cls(
@@ -89,6 +96,9 @@ class Config:
             client_date_col=int(os.getenv("CLIENT_DATE_COL", "2")),
             client_spend_col=int(os.getenv("CLIENT_SPEND_COL", "5")),
             client_tab_name_format=os.getenv("CLIENT_TAB_NAME_FORMAT", "{month} ({year})").strip(),
+            client_mode=os.getenv("CLIENT_MODE", "monthly_tabs").strip(),
+            client_tab_name=os.getenv("CLIENT_TAB_NAME", "Реклама").strip(),
+            dry_run=os.getenv("DRY_RUN", "").strip() == "1",
         )
 
 

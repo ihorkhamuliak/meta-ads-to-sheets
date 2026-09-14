@@ -166,6 +166,11 @@ class MetaClient:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    def fetch_account_currency(self) -> str:
+        """Валюта рекламного акаунта (spend приходить саме в ній), напр. 'PLN'."""
+        url = f"{GRAPH_API_BASE}/{self._version}/{self._account_id}"
+        return str(self._get(url, {"fields": "currency"}).get("currency", ""))
+
     def fetch_insights(self, lookback_days: int) -> list[dict[str, Any]]:
         """
         Fetch campaign-level insights for the last *lookback_days* complete days.
