@@ -4,10 +4,10 @@ Automated daily sync of Facebook/Instagram ad campaign spend to a client's Googl
 
 ## What it does
 
-Every day at 08:00 (Warsaw time) this script:
+Every morning (GitHub Actions cron `0 6 * * *`, 06:00 UTC; the actual start can lag) this script:
 1. Pulls campaign-level insights from the Meta Marketing API for the last 3 days
 2. Aggregates total daily spend across all campaigns
-3. Writes the value to the correct row in the client's existing monthly tracker sheet
+3. Writes the value to the correct row in the client's existing tracker sheet, in one of two modes (below)
 
 The client opens their Google Sheet in the morning and the numbers are already there.
 
@@ -40,9 +40,23 @@ meta-ads-to-sheets/
 
 - **Retry logic** — exponential backoff on Meta API rate-limit (codes 613, 80004) and transient HTTP errors (429, 5xx)
 - **Idempotent writes** — lookback window of 3 days handles Meta's attribution updates; re-running never duplicates data
-- **Dynamic tab resolution** — tab name built from date (`June (2026)`, `July (2026)`, …) so the script works across months automatically
+- **Dynamic tab resolution** (`monthly_tabs`) — tab name built from date (`June (2026)`, `July (2026)`, …) so the script works across months automatically
 - **Date lookup** — finds the correct row by matching `DD.MM.YYYY` date string in column B; no hardcoded row numbers
 - **Credentials** — service account JSON accepted as a file path (local) or raw JSON string (CI secret), same code path
+
+## Sheet modes (`CLIENT_MODE`)
+
+| Mode | Sheet layout | What gets written |
+|---|---|---|
+| `monthly_tabs` (default) | one tab per month, e.g. `June (2026)` | daily spend in the ad account currency |
+| `tracker_usd` | one tab (`CLIENT_TAB_NAME`), day rows under a `День \| Дата` header, dates as sheet serials | daily spend converted to USD at the official NBP rate for that day (last published rate on weekends); only the spend column, formula columns are never touched |
+
+`tracker_usd` only updates rows that already exist, never appends, and checks the account currency is PLN before converting.
+After writing it reads the cells back and compares the neighbouring formulas before and after.
+
+**Failures are loud, not silent.** Missing tab, header, date row or exchange rate stops the run with a non-zero exit code (4 = sheet write, 5 = exchange rate), so GitHub emails the owner instead of skipping a day.
+
+**Manual runs** (`workflow_dispatch`) accept `sheet_id`, `dry_run` and `lookback_days`, so a new sheet can be tested without touching secrets.
 
 ## Local setup
 
