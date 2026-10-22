@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from datetime import date
 from pathlib import Path
+
+import gspread
 
 # Load .env for local runs; in CI the env vars are injected directly by the runner.
 try:
@@ -83,8 +86,17 @@ def run() -> None:
                 d = date.fromisoformat(r["date"])
                 spend[d] = spend.get(d, 0.0) + float(r["spend"] or 0)
             rates = pln_per_usd(sorted(spend))
-            sheets.write_usd_to_tracker(spend, rates, config.client_sheet_id,
-                                        config.client_tab_name, config.dry_run)
+            # Google інколи віддає 5xx/429 (20.10.2026: 503 на першому ж читанні). Запис ідемпотентний — повторюємо
+            for attempt in range(1, 5):
+                try:
+                    sheets.write_usd_to_tracker(spend, rates, config.client_sheet_id,
+                                                config.client_tab_name, config.dry_run)
+                    break
+                except gspread.exceptions.APIError as exc:
+                    if attempt == 4 or not (exc.code == 429 or exc.code >= 500):
+                        raise
+                    log.warning("Google Sheets %s, спроба %d з 4, чекаю %d с", exc.code, attempt, 30 * attempt)
+                    time.sleep(30 * attempt)
         elif config.client_sheet_id:
             sheets.write_daily_totals_to_client_sheet(rows, config.client_sheet_id)
 

@@ -244,30 +244,40 @@ class SheetsClient:
             plan.append((row_by_serial[serial], d, spend_by_date[d], usd))
 
         cells = [f"{spend_col}{row}" for row, *_ in plan]
-        neighbours = [f"F{row}:G{row}" for row, *_ in plan]
         before = ws.batch_get(cells, value_render_option="UNFORMATTED_VALUE")
-        formulas_before = ws.batch_get(neighbours, value_render_option="FORMULA")
+        old_vals = [old[0][0] if old and old[0] else "" for old in before]
 
-        for (row, d, pln, usd), old in zip(plan, before):
-            old_val = old[0][0] if old and old[0] else ""
-            logger.info("%s %s%d: було %r → стане %.2f $ (%.2f zł / %.4f)%s", f"{d:%d.%m.%Y}", spend_col, row,
-                        old_val, usd, pln, pln_per_usd[d], "  [DRY RUN]" if dry_run else "")
-        if dry_run:
-            return
+        # Meta інколи віддає нулі за дні, де вже стоять гроші (21.10.2026: 0 за 18-20.10, наступного дня
+        # 19-20.10 прийшли з сумами, а 18.10 уже випав з вікна). Гроші нулем не затираємо: день пропускаємо і падаємо.
+        zeroed = [d for (_, d, _, usd), old in zip(plan, old_vals)
+                  if usd == 0 and isinstance(old, (int, float)) and old > 0]
+        for (row, d, pln, usd), old_val in zip(plan, old_vals):
+            logger.info("%s %s%d: було %r → стане %.2f $ (%.2f zł / %.4f)%s%s", f"{d:%d.%m.%Y}", spend_col, row,
+                        old_val, usd, pln, pln_per_usd[d], "  [ПРОПУСК: нуль поверх грошей]" if d in zeroed else "",
+                        "  [DRY RUN]" if dry_run else "")
+        plan = [p for p in plan if p[1] not in zeroed]
+        cells = [f"{spend_col}{row}" for row, *_ in plan]
+        neighbours = [f"F{row}:G{row}" for row, *_ in plan]
 
-        ws.batch_update([{"range": c, "values": [[usd]]} for c, (_, _, _, usd) in zip(cells, plan)],
-                        value_input_option="RAW")
+        if plan and not dry_run:
+            formulas_before = ws.batch_get(neighbours, value_render_option="FORMULA")
+            ws.batch_update([{"range": c, "values": [[usd]]} for c, (_, _, _, usd) in zip(cells, plan)],
+                            value_input_option="RAW")
 
-        # Доказ запису — перечитане значення і цілі формули поруч, а не «API не впав»
-        after = ws.batch_get(cells, value_render_option="UNFORMATTED_VALUE")
-        formulas_after = ws.batch_get(neighbours, value_render_option="FORMULA")
-        for (row, d, _, usd), got in zip(plan, after):
-            got_val = got[0][0] if got and got[0] else None
-            if got_val is None or abs(float(got_val) - usd) > 0.005:
-                raise RuntimeError(f"{spend_col}{row} ({d}): записав {usd}, перечитав {got_val!r}")
-        if [list(map(list, f)) for f in formulas_before] != [list(map(list, f)) for f in formulas_after]:
-            raise RuntimeError("Формули F:G змінились після запису — перевір таблицю")
-        logger.info("Перевірено після запису: %d клітинок %s, формули F:G цілі", len(plan), spend_col)
+            # Доказ запису — перечитане значення і цілі формули поруч, а не «API не впав»
+            after = ws.batch_get(cells, value_render_option="UNFORMATTED_VALUE")
+            formulas_after = ws.batch_get(neighbours, value_render_option="FORMULA")
+            for (row, d, _, usd), got in zip(plan, after):
+                got_val = got[0][0] if got and got[0] else None
+                if got_val is None or abs(float(got_val) - usd) > 0.005:
+                    raise RuntimeError(f"{spend_col}{row} ({d}): записав {usd}, перечитав {got_val!r}")
+            if [list(map(list, f)) for f in formulas_before] != [list(map(list, f)) for f in formulas_after]:
+                raise RuntimeError("Формули F:G змінились після запису — перевір таблицю")
+            logger.info("Перевірено після запису: %d клітинок %s, формули F:G цілі", len(plan), spend_col)
+
+        if zeroed:
+            raise RuntimeError("Meta віддала 0 $ за " + ", ".join(f"{d:%d.%m.%Y}" for d in zeroed)
+                               + ", а в таблиці там уже є витрати — ці дні не затираю. Перезапусти пізніше")
 
     # ── Private tab initialisation ────────────────────────────────────────────
 
