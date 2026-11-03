@@ -44,7 +44,7 @@ jobs:
           LOOKBACK_DAYS:               ${{ inputs.lookback_days || '3' }}
           DRY_RUN:                     ${{ inputs.dry_run || '0' }}
           CLIENT_MODE:                 tracker_usd
-          CLIENT_TAB_NAME:             "Реклама"
+          CLIENT_TAB_NAME:             "Реклама та результати"
           CLIENT_DATE_COL:             2
           CLIENT_SPEND_COL:            5
         run: python -m src.main
